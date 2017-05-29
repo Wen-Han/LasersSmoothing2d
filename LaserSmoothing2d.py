@@ -15,9 +15,9 @@ n_beams = [64, 64]
 n_grid = [128, 128]
 # types of smoothing. valid options are:
 # 'FM SSD', 'GS RPM SSD', 'AR RPM SSD', 'GS ISI', 'AR ISI'
-lsType = 'AR RPM SSD'
-# if apply simple average to AR(1)
-if_sma = True
+lsType = 'AR ISI'
+# if apply simple average to AR(1) to approximate Gaussian PSD
+if_sma = False
 # number of color cycles
 ncc = [1.0, 1.0]
 # (RMS value of) the amplitude of phase modulation
@@ -29,7 +29,7 @@ e0 = 1.0
 # complex transform for each beamlet, scalar or 1d numpy array
 epsilon_n = 1.0
 # length of the movie, normalized to 1/omega0.
-tMaxMovie = 2.2e3
+tMaxMovie = 2.2e5
 # time delay imposed by one echelon step in ISI, in 1/nuTotal
 tDelay = 1.5
 # delta time for the movie, in 1/omega_0, the code will round it so as
@@ -164,11 +164,16 @@ def ssd_2d_rpm_init():
     # random phases in x and y direction are independent
     ph = np.zeros((2, tn))
     if 'GS' in lsType:
-        ph[0, :] = gen_gaussian_time_series(tn, 0.5 * nuTotal / beta, beta)
-        ph[1, :] = gen_gaussian_time_series(tn, 0.5 * nuTotal / beta, beta)
+        temp = gen_gaussian_time_series(tn, 0.5 * nuTotal / beta, beta)
+        ph[0, :] = np.real(temp)
+        ph[1, :] = np.imag(temp)
     else:
-        ph[0, :] = sma_ar1(tn, nuTotal, beta)
-        ph[1, :] = sma_ar1(tn, nuTotal, beta)
+        # method 1: temporal domain
+        # ph[0, :] = sma_ar1(tn, nuTotal, beta)
+        # ph[1, :] = sma_ar1(tn, nuTotal, beta)
+        # method 2: spectral domain
+        ph[0, :] = gen_lorentzian_time_series_const_amp(tn, nuTotal/(beta*beta), beta)
+        ph[1, :] = gen_lorentzian_time_series_const_amp(tn, nuTotal/(beta*beta), beta)
     return ph
 
 
@@ -190,11 +195,66 @@ def isi_2d_init():
     dt = tMax / tn
     # this may take a while ...
     if 'GS' in lsType:
-        random_phase = gen_gaussian_time_series(tn,
-                                                0.5 * nuTotal / beta, beta)
+        random_phase = gen_gaussian_time_series(tn, 0.5 * nuTotal, 1)
+        random_phase /= np.sqrt(np.mean(np.square(np.abs(random_phase))))
     else:
-        random_phase = sma_ar1(tn, nuTotal, beta)
-    return np.reshape(random_phase, random_phase.size)
+        # # method 1: time domain
+        # random_phase = (np.cos(sma_ar1(tn, 0.5 * nuTotal, beta)) +
+        #                 1j * np.sin(sma_ar1(tn, 0.5 * nuTotal, beta))) / np.sqrt(2)
+        # # method 2: spectral domain
+        random_phase = gen_lorentzian_time_series(tn, 0.5 * nuTotal, 1)
+        # # method 3: spectral domain, constant beamlet intensity (not a real isi)
+        # random_phase = gen_lorentzian_time_series_const_amp(tn, nuTotal / (beta * beta), beta)
+        # random_phase = np.exp(1j * random_phase)
+    return random_phase
+
+
+def gen_lorentzian_time_series_const_amp(t_num, fwhm, rms_mean):
+    """ generate a time series that has lorentzian power spectrum
+
+    :param t_num: number of grid points in time
+    :param fwhm: full width half maximum of the power spectrum
+    :param rms_mean: root-mean-square average of the spectrum
+    :return: a time series array of complex numbers with shape [t_num]
+    """
+    if fwhm == 0.0:
+        return np.zeros((2, t_num))
+    omega = np.fft.fftshift(np.fft.fftfreq(t_num, d=dt))
+    # rand_ph = np.random.normal(scale=np.pi, size=t_num)
+    psd = 1 / (1 + np.square(omega / fwhm * 4 * np.pi))
+    pm_phase = np.random.normal(size=t_num)
+    pm_phase = np.fft.fftshift(np.fft.fft(np.fft.ifftshift(pm_phase))) * np.sqrt(psd)
+    # plt.plot(np.real(phase4))
+    pm_phase = np.fft.ifftshift(np.fft.ifft(np.fft.fftshift(pm_phase)))
+    # psd *= np.sqrt(t_num) / np.sqrt(np.mean(np.square(psd))) * rms_mean
+    # pm_phase = np.array(psd) * (np.random.normal(size=tn) +
+    #                             1j * np.random.normal(size=tn))
+    # pm_phase = np.fft.ifftshift(np.fft.fft(np.fft.fftshift(pm_phase)))
+    pm_phase *= rms_mean / np.sqrt(np.mean(np.square(np.abs(pm_phase))))
+    pm_phase = np.real(pm_phase)
+    # pm_phase = np.exp(1j * pm_phase)
+    return pm_phase
+
+
+def gen_lorentzian_time_series(t_num, fwhm, rms_mean):
+    """ generate a time series that has lorentzian power spectrum
+
+    :param t_num: number of grid points in time
+    :param fwhm: full width half maximum of the power spectrum
+    :param rms_mean: root-mean-square average of the spectrum
+    :return: a time series array of complex numbers with shape [t_num]
+    """
+    if fwhm == 0.0:
+        return np.zeros((2, t_num))
+    omega = np.fft.fftshift(np.fft.fftfreq(t_num, d=dt))
+    # rand_ph = np.random.normal(scale=np.pi, size=t_num)
+    psd = 0.5 / (1 + np.square(omega / fwhm * 4 * np.pi))
+    psd *= np.sqrt(t_num) / np.sqrt(np.mean(np.square(psd))) * rms_mean
+    pm_phase = np.sqrt(psd) * (np.random.normal(size=tn) +
+                               1j * np.random.normal(size=tn))
+    pm_phase = np.fft.ifftshift(np.fft.fft(np.fft.fftshift(pm_phase)))
+    pm_phase *= rms_mean / np.sqrt(np.mean(np.square(np.abs(pm_phase))))
+    return pm_phase
 
 
 def gen_gaussian_time_series(t_num, fwhm, rms_mean):
@@ -203,16 +263,18 @@ def gen_gaussian_time_series(t_num, fwhm, rms_mean):
     :param t_num: number of grid points in time
     :param fwhm: full width half maximum of the power spectrum
     :param rms_mean: root-mean-square average of the spectrum
-    :return: a time series array with shape [t_num]
+    :return: a time series array of complex numbers with shape [t_num]
     """
     if fwhm == 0.0:
         return np.zeros((2, t_num))
     omega = np.fft.fftshift(np.fft.fftfreq(t_num, d=dt))
-    rand_ph = np.random.normal(scale=np.pi, size=t_num)
+    # rand_ph = np.random.normal(scale=np.pi, size=t_num)
     psd = np.exp(-np.log(2) * 0.5 * np.square(omega / fwhm * 2 * np.pi))
-    psd *= np.sqrt(2 * t_num) / np.sqrt(np.mean(np.square(psd))) * rms_mean
-    pm_phase = np.array(psd) * (np.cos(rand_ph) + 1j * np.sin(rand_ph))
-    pm_phase = np.real(np.fft.ifft(np.fft.ifftshift(pm_phase)))
+    psd *= np.sqrt(t_num) / np.sqrt(np.mean(np.square(psd))) * rms_mean
+    pm_phase = np.array(psd) * (np.random.normal(size=tn) +
+                                1j * np.random.normal(size=tn))
+    pm_phase = np.fft.ifftshift(np.fft.fft(np.fft.fftshift(pm_phase)))
+    pm_phase *= rms_mean / np.sqrt(np.mean(np.square(np.abs(pm_phase))))
     return pm_phase
 
 
@@ -241,8 +303,8 @@ def isi_2d(t):
     """
     tt = np.long(t / dt)
     indx = np.array(tt + tn_d.flatten())
-    psi_n = np.reshape(pmPhase[indx], n_beams)
-    return general_form_beamlets_2d(e0, epsilon_n, psi_n, phi_n)
+    amp = np.reshape(pmPhase[indx], n_beams)
+    return general_form_beamlets_2d(e0, epsilon_n, 0, phi_n) * amp
 
 
 func_dict = {
@@ -301,7 +363,7 @@ def plot_2d_xy(fld, tm):
     """ save the absolute values of fld as a png file
     """
     plt.figure(figsize=(4.5, 4.5))
-    plt.imshow(np.abs(np.real(fld)), cmap='gray', aspect='equal',
+    plt.imshow(np.abs(fld), cmap='gray', aspect='equal',
                extent=[-n_beams[0] / 2 + 0.5, n_beams[0] / 2 - 0.5,
                        -n_beams[1] / 2 + 0.5, n_beams[1] / 2 - 0.5],
                interpolation=inter_opt, vmin=0,
@@ -334,7 +396,7 @@ if interactive_plot:
     fig.canvas.set_window_title(lsType)
 
     fig.add_subplot(121)
-    im0 = plt.imshow(np.real(bl), cmap='gray', aspect='equal',
+    im0 = plt.imshow(np.abs(bl), cmap='gray', aspect='equal',
                      extent=[-0.5, 0.5, -0.5, 0.5])
     plt.title('E before final focal lens')
     plt.xlabel('x\' ($D$)')
@@ -369,8 +431,8 @@ if interactive_plot:
 else:
 
     def speckle_time_t(i):
-        speckle = laser_smoothing_2d(i * dt)
-        fp_speckle = focal_len_2d(speckle)
+        beamlets = laser_smoothing_2d(i * dt)
+        fp_speckle = focal_len_2d(beamlets)
         plot_2d_xy(fp_speckle, i)
 
     tnMaxMovie = int(tMaxMovie / dt)
