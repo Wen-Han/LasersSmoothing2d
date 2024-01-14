@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, Button
+from matplotlib.widgets import Slider
 from multiprocessing import Pool
 
 # focal length of the final lens, in meter
@@ -15,7 +15,7 @@ n_beams = [64, 64]
 n_grid = [128, 128]
 # types of smoothing. valid options are:
 # 'FM SSD', 'GS RPM SSD', 'AR RPM SSD', 'GS ISI', 'AR ISI'
-lsType = 'AR ISI'
+lsType = 'GS ISI'
 # if apply simple average to AR(1) to approximate Gaussian PSD
 if_sma = False
 # number of color cycles
@@ -59,7 +59,7 @@ if 'SSD' in lsType:
     if nu > 0:
         s = np.divide(2 * np.pi * ncc, nu)
     else:
-        s = [0.0, 0.0]
+        s = np.array([0.0, 0.0])
 
 
 def general_form_beamlets_2d(amp, trans_n, psi_n, ps_n):
@@ -109,8 +109,8 @@ def ssd_2d_fm(t):
     return general_form_beamlets_2d(e0, epsilon_n, psi_n, phi_n)
 
 # time delay array for beamlets
-tn_d = np.arange(0.0, n_beams[0] * n_beams[1]).reshape(n_beams)
-tn = np.long(0)
+tn_d = np.arange(0.0, n_beams[0] * n_beams[1], dtype='int64').reshape(n_beams)
+tn = 0
 
 
 def sma_ar1(ttn, tot_bandwidth, pm_am):
@@ -158,9 +158,8 @@ def ssd_2d_rpm_init():
     tdx0, tdx1 = np.meshgrid(np.linspace(0.0, 1.0, num=n_beams[0]),
                              np.linspace(0.0, 1.0, num=n_beams[1]))
     tn_d = np.zeros((2, n_beams[0], n_beams[1]))
-    tn_d[0, :, :] = tdx0 * s[0] / dt
-    tn_d[1, :, :] = tdx1 * s[1] / dt
-    tn_d = tn_d.astype(long)
+    tn_d[0, :, :] = int(tdx0 * s[0] / dt)
+    tn_d[1, :, :] = int(tdx1 * s[1] / dt)
     # random phases in x and y direction are independent
     ph = np.zeros((2, tn))
     if 'GS' in lsType:
@@ -189,9 +188,8 @@ def isi_2d_init():
     # make sure we generate a long enough phase sequence
     if nuTotal > 0:
         tMax += (np.prod(n_beams) + 1) / nuTotal * tDelay
-        tn_d *= tDelay / nuTotal / dt
-        tn_d = tn_d.astype(long)
-    tn = np.long(tMax / dt)
+        tn_d *= int(tDelay / nuTotal / dt)
+    tn = int(tMax / dt)
     dt = tMax / tn
     # this may take a while ...
     if 'GS' in lsType:
@@ -301,7 +299,7 @@ def isi_2d(t):
     :param t: current time
     :return: near field electric field amplitude of the full beam
     """
-    tt = np.long(t / dt)
+    tt = int(t / dt)
     indx = np.array(tt + tn_d.flatten())
     amp = np.reshape(pmPhase[indx], n_beams)
     return general_form_beamlets_2d(e0, epsilon_n, 0, phi_n) * amp
@@ -337,7 +335,7 @@ xlp0, xlp1 = np.meshgrid(np.linspace(-0.5 * n_beams[0], 0.5 * n_beams[0],
                                      num=n_beams[0]),
                          np.linspace(-0.5 * n_beams[1], 0.5 * n_beams[1],
                                      num=n_beams[1]))
-
+print(xlp0.shape, xlp1.shape)
 
 def focal_len_2d(beamlets):
     """ Use the diffraction integral to calculate the interference of beamlets on focal plane (2d version).
@@ -350,8 +348,8 @@ def focal_len_2d(beamlets):
         field = np.fft.fft2(beamlets)
     else:
         # naive sum to calculate the Fourier transform
-        for ibx in range(-n_grid[0] / 2, n_grid[0] - n_grid[0] / 2):
-            for iby in range(-n_grid[1] / 2, n_grid[1] - n_grid[1] / 2):
+        for ibx in range(-n_grid[0] // 2, n_grid[0] - n_grid[0] // 2):
+            for iby in range(-n_grid[1] // 2, n_grid[1] - n_grid[1] // 2):
                 field[ibx, iby] = np.sum(np.multiply(
                     np.exp(1j * (ibx * dx[0] * xlp0 + iby * dx[1] * xlp1)),
                     beamlets))
@@ -393,7 +391,7 @@ if interactive_plot:
     fp_tmp = focal_len_2d(bl)
     axis_color = 'lightgoldenrodyellow'
     fig = plt.figure()
-    fig.canvas.set_window_title(lsType)
+    fig.canvas.manager.set_window_title(lsType)
 
     fig.add_subplot(121)
     im0 = plt.imshow(np.abs(bl), cmap='gray', aspect='equal',
@@ -414,7 +412,7 @@ if interactive_plot:
     # fig.subplots_adjust(left=0.1, bottom=0.25)
 
     # Add sliders for tweaking the parameters
-    time_slider_ax = fig.add_axes([0.2, 0.05, 0.65, 0.03], axisbg=axis_color)
+    time_slider_ax = fig.add_axes([0.2, 0.05, 0.65, 0.03])  # , axisbg=axis_color
     time_slider = Slider(time_slider_ax, 'Time (laser cycle)',
                          0.0, tMaxMovie, valfmt='%1d', valinit=time)
 
@@ -439,5 +437,5 @@ else:
     # the phase information have been known/constructed for any time t, each
     # process can calculate different frames simultaneously/independently
     if __name__ == '__main__':
-        pool = Pool()
+        pool = Pool(1)
         pool.map(speckle_time_t, range(tnMaxMovie))
