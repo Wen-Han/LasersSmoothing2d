@@ -25,9 +25,9 @@ tmax = 4e3
 # the amplitude of phase along each direction
 phase_mod_amp = (4.1, 4.1)
 # number of color cycles
-ncc = [1.4, 1.0]
+ncc = [1.35, 1.35]
 # bandwidth distributed with respect to the two transverse direction
-ssd_distr = [1.2, 1]
+ssd_distr = [1.2, 1.]
 #                                                                               #
 # \                                                                           / #
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ USER INPUT ENDS ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ #
@@ -148,13 +148,14 @@ def generate_speckle_pattern(tm):
     fig.canvas.manager.set_window_title(lsType)
 
     im0 = ax[0].imshow(np.fmod(np.angle(bca) + phase_plate * 0, np.pi),
-                       cmap='bwr', aspect='equal', extent=[0, n_beamlets[0], 0, n_beamlets[1]],
+                       cmap='hsv', aspect='equal', extent=[0, n_beamlets[0], 0, n_beamlets[1]],
                        vmin=-np.pi, vmax=np.pi, origin='lower'
                        )
     ax[0].set_title('Near field beamlet phases\n(excluding phase plate)')
     ax[0].set_xlabel('beamlet number along x')
     ax[0].set_ylabel('beamlet number along y')
-    fig.colorbar(im0, ax=ax[0], location="top")
+    cb0 = fig.colorbar(im0, ax=ax[0], location="top", ticks=[-np.pi, -np.pi/2, 0, np.pi/2, np.pi])
+    cb0.ax.set_xticklabels([r'-$\pi$', r'-$\pi$/2', r'0', r'$\pi$/2', r'$\pi$'])
 
     im1 = ax[1].imshow(np.abs(speckle_amp), cmap='gray', aspect='equal', extent=[0, L[0], 0, L[1]],
                        interpolation='sinc', vmin=0, vmax=np.sqrt(9 * n_beamlets[0] * n_beamlets[1]),
